@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { NfseData, TissManualData } from '../../services/nfse-parser.service';
@@ -10,7 +10,7 @@ import { NfseData, TissManualData } from '../../services/nfse-parser.service';
   templateUrl: './tiss-editor.component.html',
   styles: []
 })
-export class TissEditorComponent {
+export class TissEditorComponent implements OnChanges {
   @Input() data!: NfseData;
   @Output() generate = new EventEmitter<TissManualData>();
   @Output() cancel = new EventEmitter<void>();
@@ -18,8 +18,35 @@ export class TissEditorComponent {
   manualData: TissManualData = {
     codigoPrestador: '',
     numeroCarteira: '',
-    tipoGuia: 'SADT'
+    tipoGuia: 'SADT',
+    dataInicial: new Date().toISOString().split('T')[0], // Valor padrão (Hoje)
+    dataFinal: new Date().toISOString().split('T')[0],   // Valor padrão (Hoje)
+    codigoTuss: '' 
   };
+
+  // O Segredo: Escuta quando o 'data' muda (quando o arquivo é carregado)
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['data'] && this.data) {
+      this.updateFormWithExtractedData();
+    }
+  }
+
+  private updateFormWithExtractedData() {
+    // Se o serviço extraiu uma data de início, usa ela no formulário
+    if (this.data.dataInicio) {
+      this.manualData.dataInicial = this.data.dataInicio;
+    }
+
+    // Se o serviço extraiu uma data fim, usa ela
+    if (this.data.dataFim) {
+      this.manualData.dataFinal = this.data.dataFim;
+    }
+
+    // Sugere o código TUSS de diária se não tiver nada preenchido
+    if (!this.manualData.codigoTuss) {
+      this.manualData.codigoTuss = '60000775';
+    }
+  }
 
   onGenerate() {
     this.generate.emit(this.manualData);
@@ -48,17 +75,12 @@ export class TissEditorComponent {
     }
     
     input.value = value;
-    // Trigger model update if needed, dependent on Angular version/forms setup
-    // For [(ngModel)] on input, updating input.value directly usually works for visual
-    // providing the event propagates.
   }
 
   onCurrencyInput(event: Event) {
     const input = event.target as HTMLInputElement;
     let value = input.value.replace(/\D/g, '');
     
-    // Convert to currency format
-    // 123456 -> 1.234,56
     const numberValue = parseInt(value, 10) / 100;
     
     if (isNaN(numberValue)) {

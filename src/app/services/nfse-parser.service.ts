@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { create } from 'xmlbuilder2';
+import SparkMD5 from 'spark-md5';
 
 export interface NfseData {
   prestadorCnpj: string;
@@ -7,14 +8,26 @@ export interface NfseData {
   descricao: string;
   pacienteNome?: string;
   referencia?: string;
-  valorTotal?: string;
+  valorTotal?: string; 
   rawXml?: string;
+  numeroNota?: string;
+  prestadorNome?: string;
+  dataEmissao?: string;
+  
+  // Extrações inteligentes
+  quantidadeDiarias?: string;
+  valorUnitarioDiaria?: string;
+  dataInicio?: string;
+  dataFim?: string;
 }
 
 export interface TissManualData {
   codigoPrestador: string;
   numeroCarteira: string;
   tipoGuia: 'SADT' | 'RESUMO_INTERNACAO';
+  dataInicial: string; 
+  dataFinal: string;   
+  codigoTuss: string;
 }
 
 @Injectable({
@@ -25,100 +38,110 @@ export class NfseParserService {
   constructor() { }
 
   parse(xmlString: string): NfseData | null {
-    // 1. Pre-process to clean namespaces: <ns1:CompNfse> -> <CompNfse>
-    // This makes distinct providers' XMLs consistent for DOMParser
     const cleanXml = xmlString.replace(/<([a-zA-Z0-9]+):/g, '<').replace(/<\/([a-zA-Z0-9]+):/g, '</');
-
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(cleanXml, "text/xml");
 
-    // Try to find the root generally, or fallbacks
-    let compNfse = xmlDoc.getElementsByTagName("CompNfse")[0];
-    
-    // If we can't find CompNfse, maybe it's just the InfNfse or directly the details
-    if (!compNfse) {
-      console.warn("Tag <CompNfse> not found. Attempting loose extraction.");
-      // Fallback: search safely within the whole doc
-      compNfse = xmlDoc as any; 
-    }
-
-    // Extraction helper with case-insensitivity fallback if needed (though getElementsByTagName is versatile in HTML, validation in XML is strict)
-    const getTag = (parent: Element | Document | any, tag: string) => {
+    const getTag = (parent: any, tag: string) => {
       if (!parent) return '';
       const el = parent.getElementsByTagName ? parent.getElementsByTagName(tag)[0] : null;
       return el ? el.textContent?.trim() || '' : '';
     };
 
-    // Specific Node traversal usually robust, but flattened search is often better for variation
-    const prestadorNode = xmlDoc.getElementsByTagName("Prestador")[0];
-    const tomadorNode = xmlDoc.getElementsByTagName("Tomador")[0];
+    let compNfse = xmlDoc.getElementsByTagName("CompNfse")[0] || xmlDoc;
+    const prestadorNode = xmlDoc.getElementsByTagName("Prestador")[0] || xmlDoc.getElementsByTagName("PrestadorServico")[0];
+    const tomadorNode = xmlDoc.getElementsByTagName("Tomador")[0] || xmlDoc.getElementsByTagName("TomadorServico")[0];
+    const servicoNode = xmlDoc.getElementsByTagName("Servico")[0];
+    const valoresNode = xmlDoc.getElementsByTagName("valores")[0];
 
-    const pCnpj = getTag(prestadorNode, "Cnpj") || getTag(xmlDoc, "Cnpj"); // Fallback if structure varies
+    const pCnpj = getTag(prestadorNode, "Cnpj") || getTag(xmlDoc, "Cnpj");
     const tCnpj = getTag(tomadorNode, "Cnpj");
-    
-    // Discriminacao usually in Servico > Discriminacao, or just distinct tag in file
-    const discriminacao = getTag(xmlDoc, "Discriminacao");
+    const numeroNota = getTag(compNfse, "Numero");
+    const prestadorNome = getTag(prestadorNode, "RazaoSocial") || getTag(xmlDoc, "RazaoSocial");
+    const discriminacao = getTag(xmlDoc, "Discriminacao") || getTag(xmlDoc, "discriminacao");
+    const dataEmissao = getTag(compNfse, "DataEmissao");
+
+    let valorServicos = getTag(valoresNode, "valorServicos");
+    if (!valorServicos) valorServicos = getTag(servicoNode, "valorServicos");
 
     const parsedData: NfseData = {
       prestadorCnpj: pCnpj,
       tomadorCnpj: tCnpj,
-      descricao: discriminacao,
-      rawXml: xmlString
+      descricao: discriminacao, // Usaremos isso na observação
+      rawXml: xmlString,
+      numeroNota: numeroNota,
+      prestadorNome: prestadorNome,
+      valorTotal: valorServicos,
+      dataEmissao: dataEmissao ? dataEmissao.split('T')[0] : new Date().toISOString().split('T')[0]
     };
 
-    // Even if empty, we return the object so the user can fill it manually
-    this.extractFromDescription(parsedData);
+    this.extractSmartData(parsedData);
     
     return parsedData;
   }
 
-  private extractFromDescription(data: NfseData) {
+  private extractSmartData(data: NfseData) {
     if (!data.descricao) return;
+    const desc = data.descricao;
 
-    // Pattern: "Paciente:" (case insensitive) followed by name until newline or some delimiter
-    const pacienteMatch = data.descricao.match(/Paciente:\s*([^\n\r]+)/i);
+    // Correção: Remove "Paciente:", "Paciente :", espaços e pontos do início
+    const pacienteMatch = desc.match(/Paciente\s*[:.\-]+\s*([^\n\r]+)/i);
     if (pacienteMatch) {
-      data.pacienteNome = pacienteMatch[1].trim();
+      data.pacienteNome = pacienteMatch[1].replace(/^[:\s]+/, '').trim();
     }
 
-    // Pattern: Month/Year or similar reference
-    // Example: "DEZEMBRO 2025" or "REF: 12/2025"
-    // Let's look for common month names or MM/YYYY
-    const months = "JANEIRO|FEVEREIRO|MARÇO|ABRIL|MAIO|JUNHO|JULHO|AGOSTO|SETEMBRO|OUTUBRO|NOVEMBRO|DEZEMBRO";
-    const refMatch = data.descricao.match(new RegExp(`(${months})\\s*\\d{4}`, 'i')) || 
-                     data.descricao.match(/REF[:\.]?\s*(\d{2}\/\d{4})/i);
-                     
-    if (refMatch) {
-      data.referencia = refMatch[0].toUpperCase();
+    const qtdMatch = desc.match(/(\d+)\s*DI[AÁ]RIAS/i);
+    if (qtdMatch) {
+      data.quantidadeDiarias = qtdMatch[1];
     }
 
-    // Value extraction if explicit in description, otherwise usage of total value from XML is preferred.
-    // Start with XML value if available, but here we only have description regex request.
-    const serviceValueMatch = data.descricao.match(/Valor\s*(Total)?\s*[:$]?\s*([\d\.,]+)/i);
-    if (serviceValueMatch) {
-        data.valorTotal = serviceValueMatch[2].replace(',', '.');
+    const valorUnitMatch = desc.match(/Valor.*Di[aá]ria.*?R\$\s*([\d.,]+)/i);
+    if (valorUnitMatch) {
+      data.valorUnitarioDiaria = valorUnitMatch[1].replace('.', '').replace(',', '.');
+    }
+
+    const months = {
+      'JANEIRO': '01', 'FEVEREIRO': '02', 'MARÇO': '03', 'ABRIL': '04', 'MAIO': '05', 'JUNHO': '06',
+      'JULHO': '07', 'AGOSTO': '08', 'SETEMBRO': '09', 'OUTUBRO': '10', 'NOVEMBRO': '11', 'DEZEMBRO': '12'
+    };
+    
+    const mesAnoMatch = desc.match(new RegExp(`(${Object.keys(months).join('|')})\\s*(?:DE)?\\s*(\\d{4})`, 'i'));
+    
+    if (mesAnoMatch) {
+      const mesNome = mesAnoMatch[1].toUpperCase();
+      const ano = mesAnoMatch[2];
+      const mesNum = months[mesNome as keyof typeof months];
+      data.dataInicio = `${ano}-${mesNum}-01`;
+      const ultimoDia = new Date(parseInt(ano), parseInt(mesNum), 0).getDate();
+      data.dataFim = `${ano}-${mesNum}-${ultimoDia}`;
     }
   }
 
   generateTiss(data: NfseData, manual: TissManualData): string {
-    // Clean data formatters (remove masks)
     const cleanDigits = (val: string | undefined) => (val || '').replace(/\D/g, '');
-    const cleanCurrency = (val: string | undefined) => {
+    const formatCurrency = (val: string | undefined) => {
       if (!val) return '0.00';
-      // If it has commas, it's likely Brazilian format "1.000,00".
-      // Remove dots, replace comma with dot.
-      // However, check if it is already clean "1000.00" (from original XML)
-      // or formatted "1.000,00" (from input)
-      if (val.includes(',')) {
-        return val.replace(/\./g, '').replace(',', '.');
-      }
-      return val;
+      let num = parseFloat(val.toString().replace(',', '.'));
+      return isNaN(num) ? '0.00' : num.toFixed(2);
     };
 
     const prestadorCnpj = cleanDigits(data.prestadorCnpj);
-    const tomadorCnpj = cleanDigits(data.tomadorCnpj); // Not used in this basic TISS struct but available
-    const valorTotal = cleanCurrency(data.valorTotal);
     const carteira = cleanDigits(manual.numeroCarteira);
+    const numeroGuia = cleanDigits(data.numeroNota) || '000000';
+    const nomeContratado = data.prestadorNome || 'PRESTADOR';
+    
+    const qtdExecutada = data.quantidadeDiarias || '1';
+    const valorUnitario = data.valorUnitarioDiaria ? formatCurrency(data.valorUnitarioDiaria) : formatCurrency(data.valorTotal);
+    const valorTotalGeral = formatCurrency(data.valorTotal);
+    
+    const dtInicio = data.dataInicio || manual.dataInicial;
+    const dtFim = data.dataFim || manual.dataFinal;
+    const registroAnsPromedica = '031193'; 
+
+    // Limpa a descrição para usar como Observação (remove quebras de linha excessivas)
+    const observacaoClinica = data.descricao 
+      ? data.descricao.replace(/[\n\r]+/g, ' ').substring(0, 500) // Limite de 500 caracteres
+      : 'Servicos de assistencia em saude mental';
 
     const doc = create({ version: '1.0', encoding: 'UTF-8' })
       .ele('ans:mensagemTISS', {
@@ -139,7 +162,7 @@ export class NfseParserService {
             .up()
           .up()
           .ele('ans:destino')
-            .ele('ans:registroANS').txt('000000').up() // Placeholder or Input?
+            .ele('ans:registroANS').txt(registroAnsPromedica).up()
           .up()
           .ele('ans:padrao').txt('4.01.00').up()
         .up()
@@ -147,32 +170,67 @@ export class NfseParserService {
           .ele('ans:loteGuias')
             .ele('ans:numeroLote').txt('1').up()
             .ele('ans:guiasTISS')
-              .ele('ans:guiaResumoInternacao') // Assuming Resumo Internacao based on requirements "Select Type"
-                // This structure is complex and depends heavily on the specific TISS Guide Type
-                // For simplified demo, we assume a basic structure.
+              .ele('ans:guiaResumoInternacao') 
                 .ele('ans:cabecalhoGuia')
-                  .ele('ans:registroANS').txt('000000').up()
-                  .ele('ans:numeroGuiaPrestador').txt('12345').up()
+                  .ele('ans:registroANS').txt(registroAnsPromedica).up()
+                  .ele('ans:numeroGuiaPrestador').txt(numeroGuia).up()
+                .up()
+                .ele('ans:dadosAutorizacao')
+                    .ele('ans:numeroGuiaSolicitacaoInternacao').txt(numeroGuia).up()
+                    .ele('ans:senha').txt(numeroGuia).up()
+                    .ele('ans:dataAutorizacao').txt(dtInicio).up()
                 .up()
                 .ele('ans:dadosBeneficiario')
                   .ele('ans:numeroCarteira').txt(carteira).up()
                   .ele('ans:nomeBeneficiario').txt(data.pacienteNome || 'NAO INFORMADO').up()
+                  .ele('ans:tipoInternacao').txt('1').up()
+                .up()
+                .ele('ans:dadosInternacao') 
+                    .ele('ans:caraterAtendimento').txt('1').up()
+                    .ele('ans:tipoInternacao').txt('1').up()
+                    .ele('ans:regimeInternacao').txt('1').up()
+                    .ele('ans:dataInicioFaturamento').txt(dtInicio).up()
+                    .ele('ans:dataFimFaturamento').txt(dtFim).up()
                 .up()
                 .ele('ans:dadosExecutante')
                    .ele('ans:contratadoExecutante')
                      .ele('ans:cnpjContratado').txt(prestadorCnpj).up()
-                     .ele('ans:nomeContratado').txt('PRESTADOR').up() 
+                     .ele('ans:nomeContratado').txt(nomeContratado).up() 
                    .up()
                    .ele('ans:CNES').txt('0000000').up()
                 .up()
+                .ele('ans:procedimentosExecutados')
+                    .ele('ans:procedimentoExecutado')
+                        .ele('ans:sequencialItem').txt('1').up()
+                        .ele('ans:dataExecucao').txt(dtFim).up()
+                        .ele('ans:horaInicio').txt('08:00:00').up()
+                        .ele('ans:horaFim').txt('18:00:00').up()
+                        .ele('ans:procedimento')
+                            .ele('ans:codigoTabela').txt('22').up()
+                            .ele('ans:codigoProcedimento').txt(manual.codigoTuss || '60000775').up()
+                            .ele('ans:descricaoProcedimento').txt('DIARIA DE INTERNACAO').up()
+                        .up()
+                        .ele('ans:quantidadeExecutada').txt(qtdExecutada).up()
+                        .ele('ans:valorUnitario').txt(valorUnitario).up()
+                        .ele('ans:valorTotal').txt(valorTotalGeral).up()
+                    .up()
+                .up()
+                // NOVIDADE: Campo de Observação com os dados extras da nota
+                .ele('ans:observacao').txt(observacaoClinica).up() 
                 .ele('ans:valorTotal')
-                  .ele('ans:valorTotalGeral').txt(valorTotal).up()
+                  .ele('ans:valorTotalGeral').txt(valorTotalGeral).up()
                 .up()
               .up()
             .up()
           .up()
-        .up()
-      .up();
+        .up();
+
+    const xmlContent = doc.end({ prettyPrint: false });
+    const hash = SparkMD5.hash(xmlContent);
+
+    doc.ele('ans:epilogo')
+        .ele('ans:hash').txt(hash).up()
+    .up();
 
     return doc.end({ prettyPrint: true });
   }
