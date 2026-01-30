@@ -1,59 +1,59 @@
-# ConversorTiff
+# Conversor NFS-e para TISS
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 19.2.17.
+Aplicação web desenvolvida em Angular para facilitar o faturamento eletrônico de operadoras de saúde, convertendo arquivos XML de Nota Fiscal de Serviço Eletrônica (NFS-e) para o padrão **TISS 4.01.00** exigido pela ANS.
 
-## Development server
+## 🚀 Funcionalidades
 
-To start a local development server, run:
+- **Upload Intuitivo**: Área de Drag & Drop para envio rápido de arquivos XML.
+- **Extração Inteligente**: 
+  - Leitura automática de dados da nota (CNPJ Prestador/Tomador).
+  - Uso de Expressões Regulares (Regex) para identificar Paciente, Datas e Valores na descrição do serviço.
+- **Edição e Validação**:
+  - Interface para correção manual de dados extraídos.
+  - **Máscaras de Entrada**: Formatação automática para CNPJ (`XX.XXX.XXX/XXXX-XX`) e Moeda (R$).
+  - **Validação**: Bloqueio de caracteres não numéricos e limites de tamanho (MaxLength) para garantir a integridade do arquivo final.
+- **Geração TISS**:
+  - Criação de arquivos XML compatíveis com o padrão TISS 4.01.00 (Envio de Lote de Guias).
+  - Tratamento automático de dados (remoção de pontuação/formatação) antes da geração.
 
-```bash
-ng serve
-```
+## 🛠️ Tecnologias Utilizadas
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+- **Angular v17+**: Framework principal (Standalone Components).
+- **Tailwind CSS**: Estilização moderna e responsiva (Design System "Clean/Linear").
+- **xmlbuilder2**: Geração robusta de XML no cliente.
+- **Heroicons**: Ícones de interface.
 
-## Code scaffolding
+## 📦 Como Executar
 
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+Este projeto é uma Single Page Application (SPA) 100% client-side.
 
-```bash
-ng generate component component-name
-```
+### Pré-requisitos
 
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+- Node.js (v18 ou superior recomendado)
+- NPM
 
-```bash
-ng generate --help
-```
+### Passos
 
-## Building
+1. **Instalar Dependências**:
+   ```bash
+   npm install
+   ```
 
-To build the project run:
+2. **Rodar Localmente**:
+   ```bash
+   npm start
+   ```
+   Acesse `http://localhost:4200/`.
 
-```bash
-ng build
-```
+3. **Build para Produção**:
+   ```bash
+   npm run build
+   ```
+   Os arquivos otimizados serão gerados na pasta `dist/conversor-tiff`.
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+## 🛡️ Segurança e Privacidade
 
-## Running unit tests
+Todo o processamento é feito **localmente no navegador do usuário**. Nenhum dado da nota fiscal ou do paciente é enviado para servidores externos.
 
-To execute unit tests with the [Karma](https://karma-runner.github.io) test runner, use the following command:
-
-```bash
-ng test
-```
-
-## Running end-to-end tests
-
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
-
-## Additional Resources
-
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+---
+Desenvolvido com ❤️ para agilizar faturamentos médicos.
