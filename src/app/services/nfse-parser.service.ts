@@ -67,7 +67,7 @@ export class NfseParserService {
     const parsedData: NfseData = {
       prestadorCnpj: pCnpj,
       tomadorCnpj: tCnpj,
-      descricao: discriminacao, // Usaremos isso na observação
+      descricao: discriminacao,
       rawXml: xmlString,
       numeroNota: numeroNota,
       prestadorNome: prestadorNome,
@@ -84,7 +84,6 @@ export class NfseParserService {
     if (!data.descricao) return;
     const desc = data.descricao;
 
-    // Correção: Remove "Paciente:", "Paciente :", espaços e pontos do início
     const pacienteMatch = desc.match(/Paciente\s*[:.\-]+\s*([^\n\r]+)/i);
     if (pacienteMatch) {
       data.pacienteNome = pacienteMatch[1].replace(/^[:\s]+/, '').trim();
@@ -138,16 +137,16 @@ export class NfseParserService {
     const dtFim = data.dataFim || manual.dataFinal;
     const registroAnsPromedica = '031193'; 
 
-    // Limpa a descrição para usar como Observação (remove quebras de linha excessivas)
     const observacaoClinica = data.descricao 
-      ? data.descricao.replace(/[\n\r]+/g, ' ').substring(0, 500) // Limite de 500 caracteres
+      ? data.descricao.replace(/[\n\r]+/g, ' ').substring(0, 500)
       : 'Servicos de assistencia em saude mental';
 
+    // ATUALIZAÇÃO 2026: Versão 4.02.00
     const doc = create({ version: '1.0', encoding: 'UTF-8' })
       .ele('ans:mensagemTISS', {
         'xmlns:ans': 'http://www.ans.gov.br/padroes/tiss/schemas',
         'xmlns:xsi': 'http://www.w3.org/2001/XMLSchema-instance',
-        'xsi:schemaLocation': 'http://www.ans.gov.br/padroes/tiss/schemas http://www.ans.gov.br/padroes/tiss/schemas/tissV4_01_00.xsd'
+        'xsi:schemaLocation': 'http://www.ans.gov.br/padroes/tiss/schemas http://www.ans.gov.br/padroes/tiss/schemas/tissV4_02_00.xsd'
       })
         .ele('ans:cabecalho')
           .ele('ans:identificacaoTransacao')
@@ -164,7 +163,8 @@ export class NfseParserService {
           .ele('ans:destino')
             .ele('ans:registroANS').txt(registroAnsPromedica).up()
           .up()
-          .ele('ans:padrao').txt('4.01.00').up()
+          // ATUALIZAÇÃO: Versão 4.02.00
+          .ele('ans:padrao').txt('4.02.00').up()
         .up()
         .ele('ans:prestadorParaOperadora')
           .ele('ans:loteGuias')
@@ -215,7 +215,6 @@ export class NfseParserService {
                         .ele('ans:valorTotal').txt(valorTotalGeral).up()
                     .up()
                 .up()
-                // NOVIDADE: Campo de Observação com os dados extras da nota
                 .ele('ans:observacao').txt(observacaoClinica).up() 
                 .ele('ans:valorTotal')
                   .ele('ans:valorTotalGeral').txt(valorTotalGeral).up()
