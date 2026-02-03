@@ -20,7 +20,6 @@ export class AppComponent {
   async onFileSelected(file: File) {
     this.step = 'processing';
     
-    // Simulate slight delay for UX (skeleton effect)
     setTimeout(async () => {
       const text = await file.text();
       const result = this.nfseParser.parse(text);
@@ -38,6 +37,7 @@ export class AppComponent {
     if (!this.parsedData) return;
     
     const xmlTiss = this.nfseParser.generateTiss(this.parsedData, manualData);
+    // Adiciona timestamp para evitar cache no upload
     this.downloadFile(xmlTiss, `tiss-${new Date().getTime()}.xml`);
   }
 
@@ -47,7 +47,8 @@ export class AppComponent {
   }
 
   private downloadFile(content: string, filename: string) {
-    const blob = new Blob([content], { type: 'text/xml' });
+    // CORREÇÃO: Força charset ISO-8859-1 para garantir compatibilidade com portais legados
+    const blob = new Blob([content], { type: 'text/xml;charset=iso-8859-1' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

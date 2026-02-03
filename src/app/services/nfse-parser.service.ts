@@ -116,6 +116,15 @@ export class NfseParserService {
     }
   }
 
+  // Função para remover acentos e caracteres especiais (Segurança para ISO-8859-1)
+  private sanitize(str: string | undefined): string {
+    if (!str) return '';
+    return str
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, "") // Remove acentos
+      .replace(/[^a-zA-Z0-9\s\.\-\/\(\),]/g, "")      // Remove caracteres estranhos
+      .toUpperCase();                                  // TISS prefere maiúsculas
+  }
+
   generateTiss(data: NfseData, manual: TissManualData): string {
     const cleanDigits = (val: string | undefined) => (val || '').replace(/\D/g, '');
     const formatCurrency = (val: string | undefined) => {
@@ -124,10 +133,12 @@ export class NfseParserService {
       return isNaN(num) ? '0.00' : num.toFixed(2);
     };
 
+    // Aplicando sanitização em TODOS os campos de texto livre
     const prestadorCnpj = cleanDigits(data.prestadorCnpj);
     const carteira = cleanDigits(manual.numeroCarteira);
     const numeroGuia = cleanDigits(data.numeroNota) || '000000';
-    const nomeContratado = data.prestadorNome || 'PRESTADOR';
+    const nomeContratado = this.sanitize(data.prestadorNome) || 'PRESTADOR';
+    const nomeBeneficiario = this.sanitize(data.pacienteNome) || 'NAO INFORMADO';
     
     const qtdExecutada = data.quantidadeDiarias || '1';
     const valorUnitario = data.valorUnitarioDiaria ? formatCurrency(data.valorUnitarioDiaria) : formatCurrency(data.valorTotal);
@@ -138,11 +149,11 @@ export class NfseParserService {
     const registroAnsPromedica = '031193'; 
 
     const observacaoClinica = data.descricao 
-      ? data.descricao.replace(/[\n\r]+/g, ' ').substring(0, 500)
-      : 'Servicos de assistencia em saude mental';
+      ? this.sanitize(data.descricao.replace(/[\n\r]+/g, ' ')).substring(0, 500)
+      : 'SERVICOS DE ASSISTENCIA EM SAUDE MENTAL';
 
-    // ATUALIZAÇÃO 2026: Versão 4.02.00
-    const doc = create({ version: '1.0', encoding: 'UTF-8' })
+    // ATENÇÃO: Mudança para ISO-8859-1 no header
+    const doc = create({ version: '1.0', encoding: 'ISO-8859-1' })
       .ele('ans:mensagemTISS', {
         'xmlns:ans': 'http://www.ans.gov.br/padroes/tiss/schemas',
         'xmlns:xsi': 'http://www.w3.org/2001/XMLSchema-instance',
@@ -163,7 +174,6 @@ export class NfseParserService {
           .ele('ans:destino')
             .ele('ans:registroANS').txt(registroAnsPromedica).up()
           .up()
-          // ATUALIZAÇÃO: Versão 4.02.00
           .ele('ans:padrao').txt('4.02.00').up()
         .up()
         .ele('ans:prestadorParaOperadora')
@@ -182,7 +192,7 @@ export class NfseParserService {
                 .up()
                 .ele('ans:dadosBeneficiario')
                   .ele('ans:numeroCarteira').txt(carteira).up()
-                  .ele('ans:nomeBeneficiario').txt(data.pacienteNome || 'NAO INFORMADO').up()
+                  .ele('ans:nomeBeneficiario').txt(nomeBeneficiario).up()
                   .ele('ans:tipoInternacao').txt('1').up()
                 .up()
                 .ele('ans:dadosInternacao') 
@@ -224,8 +234,16 @@ export class NfseParserService {
           .up()
         .up();
 
-    const xmlContent = doc.end({ prettyPrint: false });
-    const hash = SparkMD5.hash(xmlContent);
+    // 1. Gera o XML completo
+    let xmlContent = doc.end({ prettyPrint: false });
+    
+    // 2. CORREÇÃO CRÍTICA DO HASH:
+    // O padrão TISS exige que o hash seja calculado sobre o CONTEÚDO da tag mensagemTISS,
+    // EXCLUINDO o preâmbulo (<?xml...?>) e excluindo a própria tag de hash.
+    // Como o xmlbuilder gera com preâmbulo, removemos ele antes de hashear.
+    const contentToHash = xmlContent.replace(/<\?xml.*?>/, '').trim();
+    
+    const hash = SparkMD5.hash(contentToHash);
 
     doc.ele('ans:epilogo')
         .ele('ans:hash').txt(hash).up()
